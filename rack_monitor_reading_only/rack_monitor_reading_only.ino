@@ -41,7 +41,8 @@ void loop() {
     Serial.print(result.temperature);
     Serial.print("°C; Humidity: ");
     Serial.print(result.humidity);
-    Serial.println("%");
+    Serial.print("%; Temperature discrepancy: ");
+    Serial.println(result.temperature - ds18b20_result);
   }
   delay(2000);
 }
