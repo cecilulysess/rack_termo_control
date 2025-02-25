@@ -1,3 +1,4 @@
+#include <math.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -5,6 +6,11 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <DHT.h>
+
+// Define PWM IO pins
+#define TIMER_2_CONTROLLED_PIN 3
+#define PWM_TOP_FAN_RPM_PIN 4
+#define PWM_BUTTOM_FAN_RPM_PIN 2
 
 // Define the specific screen we have
 #define SCREEN_WIDTH 128
@@ -50,6 +56,9 @@ void setup() {
   // Initialize sensors
   sensors.begin();
   dht.begin();
+
+  // Initialize PWM control
+  setupTimer2ForFanControl();
 }
 
 void loop() {
@@ -58,24 +67,32 @@ void loop() {
   float ds18b20_result = handle18B20(currentMillis);
 
   if (isnan(result.temperature) && isnan(result.humidity)) {
-    printLine("Wait for thermister reading...");
+    printLines("Wait for thermister reading...", getTimer2PWMDutyCycle());
   } else {
-    printLine(formatSensorPrintText(ds18b20_result, result));
+    printLines(formatSensorPrintText(ds18b20_result, result), getTimer2PWMDutyCycle());
   }
   delay(2000);
 }
 
 String formatSensorPrintText(float ds18b20_read, DhtReading dht_read) {
-  return "Temperature:\n\tD12: " + String(ds18b20_read) + "C\n\tD8 : " + 
-    String(dht_read.temperature) + "C\nHumidity: " + String(dht_read.humidity) + "%";
+  return "D12: " + String(ds18b20_read, 1) + "C D8: " + String(dht_read.temperature, 1) + "C\nHumidity:  " + String(dht_read.humidity, 1) + "%";
 }
 
-void printLine(String text) {
+void printLines(const char* text, const char* text2) {
   Serial.println(text);    // Print to Serial Monitor
   display.clearDisplay();  // Clear previous text
   display.setCursor(0, 0);
-  display.println(text);  // Print to OLED
+  display.println(text);
+  if (text2) display.println(text2);
   display.display();
+}
+
+void printLine(String text) {
+  printLines(text.c_str(), NULL);
+}
+
+void printLines(String text, String text2) {
+  printLines(text.c_str(), text2.c_str());
 }
 
 // Read data every `currentMillis`
@@ -108,4 +125,32 @@ DhtReading handleDht11(unsigned long currentMillis) {
     result.humidity = humidity;
   }
   return result;
+}
+
+// Set timer 2 to use pin 3 output at 25kHz PWM using Fast PWM mode.
+// The setting override pin 11 so that it cannot be used independently.
+// The output value will be 0-79 for duty cycle control 0-100%
+void setupTimer2ForFanControl() {
+  pinMode(TIMER_2_CONTROLLED_PIN, OUTPUT);
+
+  TCCR2A = _BV(COM2B1) | _BV(WGM21) | _BV(WGM20);  // Fast PWM, non-inverting mode
+  TCCR2B = _BV(WGM22) | _BV(CS21);                 // Prescaler = 8
+  OCR2A = 79;                                      // Set TOP value for 25 kHz
+  OCR2B = 39;                                      // 50% duty cycle as default
+}
+
+// @param duty_cycle: any value between 20 - 100
+// if < 20 provided, it write 20, if > 100 provided it write 100
+void writeTimer2PWMOutput(int duty_cycle) {
+  int value_to_write = duty_cycle < 20 ? 20 : duty_cycle;
+  value_to_write = duty_cycle > 100 ? 100 : duty_cycle;
+  // OCR2B is used to control the duty cycle by:
+  // D = OCR2B / (OCR2A + 1) * 100,
+  // But the value measure is slightly off, so I use 79 as upper bound
+  OCR2B = ceil((value_to_write / 100.0) * 79);
+}
+
+// Return the current duty cycle value in % string.
+String getTimer2PWMDutyCycle() {
+  return "Fan Speed: " + String(OCR2B / 80.0 * 100.0, 1) + "%";
 }
