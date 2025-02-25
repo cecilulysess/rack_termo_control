@@ -152,5 +152,5 @@ void writeTimer2PWMOutput(int duty_cycle) {
 
 // Return the current duty cycle value in % string.
 String getTimer2PWMDutyCycle() {
-  return "Fan Speed: " + String(OCR2B / 80.0 * 100.0, 1) + "%";
+  return "Fan Speed: " + String(OCR2B / 79.0 * 100.0, 1) + "%";
 }
