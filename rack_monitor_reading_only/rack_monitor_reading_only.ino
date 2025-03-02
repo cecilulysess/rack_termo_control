@@ -36,7 +36,14 @@ DHT dht(DS_DHT11_PIN, DHT_TYPE);
 // Timing for DHT11
 unsigned long lastDhtTime = 0, last18B20Time = 0;
 
-const long tempReadingInterval = 2000;  // update every 2s
+volatile long pulseCountBottomFan = 0;
+unsigned long lastBottomFanIntMillis = 0;
+volatile long pulseCountTopFan = 0;
+
+const long tempReadingInterval = 1000;           // update every 2s
+const unsigned long screenPrintInterval = 2000;  // print every 2s
+
+unsigned long lastScreenPrintMillis = 0;
 
 void setup() {
   Serial.begin(9600);
@@ -59,40 +66,54 @@ void setup() {
 
   // Initialize PWM control
   setupTimer2ForFanControl();
+  setupBottomFanTach();
+
+  writeTimer2PWMOutput(20);
 }
 
 void loop() {
   unsigned long currentMillis = millis();
-  DhtReading result = handleDht11(currentMillis);
-  float ds18b20_result = handle18B20(currentMillis);
+  // int bottomFanRpm = currentButtomFanRpm(currentMillis);
 
-  if (isnan(result.temperature) && isnan(result.humidity)) {
-    printLines("Wait for thermister reading...", getTimer2PWMDutyCycle());
-  } else {
-    printLines(formatSensorPrintText(ds18b20_result, result), getTimer2PWMDutyCycle());
+  if (currentMillis - lastScreenPrintMillis > screenPrintInterval) {
+
+    DhtReading result = handleDht11(currentMillis);
+    float ds18b20_result = handle18B20(currentMillis);
+    if (isnan(result.temperature) && isnan(result.humidity)) {
+      printLines("Wait for thermister reading...", getTimer2PWMDutyCycle(), "RPM:" + String(currentButtomFanRpm()));
+    } else {
+      // test
+      // writeTimer2PWMOutput(20);
+      printLines(formatSensorPrintText(ds18b20_result, result), getTimer2PWMDutyCycle(), "RPM:" + String(currentButtomFanRpm()));
+    }
+    lastScreenPrintMillis = currentMillis;
   }
-  delay(2000);
 }
 
 String formatSensorPrintText(float ds18b20_read, DhtReading dht_read) {
   return "D12: " + String(ds18b20_read, 1) + "C D8: " + String(dht_read.temperature, 1) + "C\nHumidity:  " + String(dht_read.humidity, 1) + "%";
 }
 
-void printLines(const char* text, const char* text2) {
+void printLines(const char* text, const char* text2, const char* text3) {
   Serial.println(text);    // Print to Serial Monitor
   display.clearDisplay();  // Clear previous text
   display.setCursor(0, 0);
   display.println(text);
   if (text2) display.println(text2);
+  if (text3) display.println(text3);
   display.display();
 }
 
 void printLine(String text) {
-  printLines(text.c_str(), NULL);
+  printLines(text.c_str(), NULL, NULL);
 }
 
 void printLines(String text, String text2) {
-  printLines(text.c_str(), text2.c_str());
+  printLines(text.c_str(), text2.c_str(), NULL);
+}
+
+void printLines(String text, String text2, String text3) {
+  printLines(text.c_str(), text2.c_str(), text3.c_str());
 }
 
 // Read data every `currentMillis`
@@ -153,4 +174,57 @@ void writeTimer2PWMOutput(int duty_cycle) {
 // Return the current duty cycle value in % string.
 String getTimer2PWMDutyCycle() {
   return "Fan Speed: " + String(OCR2B / 79.0 * 100.0, 1) + "%";
+}
+
+void setupBottomFanTach() {
+  pinMode(PWM_BUTTOM_FAN_RPM_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(PWM_BUTTOM_FAN_RPM_PIN), bottomFanTachInterrupt, FALLING);
+}
+
+unsigned long volatile timestampNM1 = 0, timestampN = 0;
+// Somehow due to GND issue between Arduino and External
+// Powersource, the signal is really noisy. Use 20 to debounce
+#define DEBOUNCE 0
+int lastTachState = LOW;
+unsigned long lastDebounceTime = 0;
+
+void bottomFanTachInterrupt() {
+  // this method is not accurate
+  // int currentTachState = digitalRead(PWM_BUTTOM_FAN_RPM_PIN);  // Read the TACH signal
+  // // Check if the signal has changed (HIGH to LOW or LOW to HIGH)
+  // if (currentTachState != lastTachState) {
+  //   lastDebounceTime = millis();  // Reset debounce timer
+  // }
+  // // Only increment pulseCount if the signal has remained stable for a debounce delay
+  // if ((millis() - lastDebounceTime) > DEBOUNCE) {
+  //   if (currentTachState == LOW) {  // If a falling edge is detected
+  //     pulseCountBottomFan++;        // Increment the pulse count
+  //   }
+  // }
+
+  // lastTachState = currentTachState;  // Update lastTachState for next comparison
+
+  // pulseCountBottomFan++;
+  unsigned long currentMillis = millis();
+  if (currentMillis - timestampN > DEBOUNCE) {
+    timestampNM1 = timestampN;
+    timestampN = currentMillis;
+  }
+}
+
+long currentButtomFanRpm() {
+  Serial.println("curr: " + String(timestampN) + " diff: " + String(timestampN - timestampNM1));
+  return 60000.0 / (timestampN - timestampNM1) / 2.0;
+  // unsigned long currentMillis_ = millis();
+  // if (currentMillis_ - lastBottomFanIntMillis >= 1000) {
+  //   long pulseCount = pulseCountBottomFan;
+  //   Serial.print("curr: " + String(currentMillis_) + " pulse: " + String(pulseCount));
+  //   // Serial.print(" diff: " + String(currentMillis_ - lastBottomFanIntMillis));
+  //   long rpm = ceil((pulseCount / 2.0) * 60000 / screenPrintInterval);
+  //   Serial.println("Rpm: "+ String(rpm));
+  //   pulseCountBottomFan = 0;
+  //   lastBottomFanIntMillis = currentMillis_;
+  //   return rpm;
+  // }
+  // return -1;
 }
